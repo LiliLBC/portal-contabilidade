@@ -6,8 +6,13 @@
 <title>LBC Solicitadora — Contabilidade</title>
 <link href="https://fonts.googleapis.com/css2?family=DM+Sans:wght@300;400;500;600&family=DM+Mono:wght@400;500&display=swap" rel="stylesheet">
 
-<!-- MSAL.js para autenticação Microsoft -->
-<script src="https://alcdn.msauth.net/browser/2.38.3/js/msal-browser.min.js"></script>
+<!-- MSAL.js para autenticação Microsoft (jsDelivr; fallback para unpkg) -->
+<script src="https://cdn.jsdelivr.net/npm/@azure/msal-browser@2.38.3/lib/msal-browser.min.js"></script>
+<script>
+  if (typeof msal === 'undefined') {
+    document.write(unescape("%3Cscript src='https://unpkg.com/@azure/msal-browser@2.38.3/lib/msal-browser.min.js'%3E%3C/script%3E"));
+  }
+</script>
 <!-- SheetJS para exportação Excel -->
 <script src="https://cdnjs.cloudflare.com/ajax/libs/xlsx/0.18.5/xlsx.full.min.js"></script>
 
