@@ -281,6 +281,7 @@ body{font-family:'DM Sans',sans-serif;background:var(--bg);color:var(--text);fon
 
       <button id="btn-extrato-p" class="btn btn-sm" onclick="abrirExtrato('Principal')" style="opacity:.45;cursor:not-allowed" disabled title="Sem extrato carregado">📎 Extrato Principal</button>
       <button id="btn-extrato-s" class="btn btn-sm" onclick="abrirExtrato('Secundária')" style="opacity:.45;cursor:not-allowed" disabled title="Sem extrato carregado">📎 Extrato Secundária</button>
+      <button id="btn-conciliacao-r" class="btn btn-sm" onclick="abrirConciliacaoPDF()" style="opacity:.45;cursor:not-allowed" disabled title="Sem conciliação para este mês">📑 Conciliação</button>
 
       <div style="margin-left:auto;display:flex;gap:.5rem">
         <button class="btn btn-sm" onclick="carregarContabilidade()">↺ Atualizar</button>
@@ -390,6 +391,8 @@ let tipoFiltro = 'Despesa empresa';
 
 // Cache em memória dos extratos do mês corrente — chave: "ano-mes" → {Principal:url, Secundaria:url}
 let extratoCacheMes = { chave: '', urls: { Principal: '', Secundaria: '' } };
+// Cache análoga para o PDF de conciliação do mês — chave: "ano-mes" → url
+let conciliacaoCacheMes = { chave: '', url: '' };
 
 // ══════════════════════════════════════════════════════════════════
 // AUTENTICAÇÃO
@@ -533,6 +536,7 @@ async function carregarContabilidade() {
   document.getElementById('cb-list').style.display = 'none';
   // Invalidar cache de extratos para forçar nova procura no SharePoint
   extratoCacheMes = { chave: '', urls: { Principal: '', Secundaria: '' } };
+  conciliacaoCacheMes = { chave: '', url: '' };
 
   try {
     if (!listaId) await inicializarSite();
@@ -813,6 +817,64 @@ async function atualizarBotoesExtrato() {
     btn.title = url ? `Abrir extrato ${conta} de ${mes} ${ano}` : `Sem extrato ${conta} para ${mes} ${ano}`;
     btn.innerHTML = url ? `📄 Extrato ${conta} ✓` : `📎 Extrato ${conta}`;
   });
+  // Atualizar também o botão de Conciliação (PDF assinado)
+  await atualizarBotaoConciliacao();
+}
+
+// ══════════════════════════════════════════════════════════════════
+// PDF DE CONCILIAÇÃO ASSINADA — procura "Conciliacao_{Mes}_{Ano}.pdf"
+// na pasta YYYY/MM Mes da biblioteca FATURAS_View
+// ══════════════════════════════════════════════════════════════════
+async function procurarConciliacaoMes(mes, ano) {
+  if (!bibliotecaFaturasId) return '';
+  const mesIdx = MESES_PT.indexOf(mes);
+  if (mesIdx < 0) return '';
+  const mesPasta = String(mesIdx + 1).padStart(2, '0') + ' ' + mes;
+  try {
+    const path = `${ano}/${encodeURIComponent(mesPasta)}`;
+    const url = `${GRAPH_BASE}/drives/${bibliotecaFaturasId}/root:/${path}:/children?$select=name,webUrl&$top=200`;
+    const r = await fetch(url, { headers: { 'Authorization': 'Bearer ' + graphToken } });
+    if (!r.ok) return '';
+    const data = await r.json();
+    const itens = data.value || [];
+    let achado = '';
+    itens.forEach(it => {
+      const n = (it.name || '');
+      if (/^Conciliacao[_\.]/i.test(n)) achado = it.webUrl || achado;
+    });
+    return achado;
+  } catch (e) {
+    console.error('procurarConciliacaoMes:', e);
+    return '';
+  }
+}
+
+async function abrirConciliacaoPDF() {
+  const mes = document.getElementById('cb-filtro-mes').value || MESES_PT[new Date().getMonth()];
+  const ano = parseInt(document.getElementById('cb-filtro-ano').value || new Date().getFullYear(), 10);
+  const chave = ano + '-' + mes;
+  if (conciliacaoCacheMes.chave !== chave) {
+    conciliacaoCacheMes = { chave, url: await procurarConciliacaoMes(mes, ano) };
+  }
+  if (conciliacaoCacheMes.url) window.open(conciliacaoCacheMes.url, '_blank');
+  else alert(`Sem PDF de conciliação para ${mes} ${ano}.`);
+}
+
+async function atualizarBotaoConciliacao() {
+  const mes = document.getElementById('cb-filtro-mes').value || MESES_PT[new Date().getMonth()];
+  const ano = parseInt(document.getElementById('cb-filtro-ano').value || new Date().getFullYear(), 10);
+  const chave = ano + '-' + mes;
+  if (conciliacaoCacheMes.chave !== chave) {
+    conciliacaoCacheMes = { chave, url: await procurarConciliacaoMes(mes, ano) };
+  }
+  const btn = document.getElementById('btn-conciliacao-r');
+  if (!btn) return;
+  const url = conciliacaoCacheMes.url || '';
+  btn.disabled = !url;
+  btn.style.opacity = url ? '1' : '.45';
+  btn.style.cursor = url ? 'pointer' : 'not-allowed';
+  btn.title = url ? `Abrir conciliação de ${mes} ${ano}` : `Sem conciliação para ${mes} ${ano}`;
+  btn.innerHTML = url ? `📑 Conciliação ✓` : `📎 Conciliação`;
 }
 
 // ══════════════════════════════════════════════════════════════════
