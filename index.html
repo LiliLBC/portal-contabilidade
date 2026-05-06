@@ -279,6 +279,9 @@ body{font-family:'DM Sans',sans-serif;background:var(--bg);color:var(--text);fon
 
       <button class="btn-limpar" onclick="limparFiltros()">✕ Limpar filtros</button>
 
+      <button id="btn-extrato-p" class="btn btn-sm" onclick="abrirExtrato('Principal')" style="opacity:.45;cursor:not-allowed" disabled title="Sem extrato carregado">📎 Extrato Principal</button>
+      <button id="btn-extrato-s" class="btn btn-sm" onclick="abrirExtrato('Secundária')" style="opacity:.45;cursor:not-allowed" disabled title="Sem extrato carregado">📎 Extrato Secundária</button>
+
       <div style="margin-left:auto;display:flex;gap:.5rem">
         <button class="btn btn-sm" onclick="carregarContabilidade()">↺ Atualizar</button>
         <div class="dropdown-wrap">
@@ -381,8 +384,12 @@ let graphToken = null;
 let contaAtual = null;
 let siteId = null;
 let listaId = null;
+let bibliotecaFaturasId = null;
 let todosMovimentos = [];
 let tipoFiltro = 'Despesa empresa';
+
+// Cache em memória dos extratos do mês corrente — chave: "ano-mes" → {Principal:url, Secundaria:url}
+let extratoCacheMes = { chave: '', urls: { Principal: '', Secundaria: '' } };
 
 // ══════════════════════════════════════════════════════════════════
 // AUTENTICAÇÃO
@@ -506,6 +513,16 @@ async function inicializarSite() {
     throw new Error(`Lista "${LISTA_NOME}" não encontrada no site.`);
   }
   listaId = listas.value[0].id;
+
+  // Obter ID da biblioteca de faturas (drive) — necessário para procurar extratos
+  try {
+    const drives = await graphGet(`${GRAPH_BASE}/sites/${siteId}/drives`);
+    const drv = (drives.value || []).find(d => d.name === BIBLIOTECA_NOME);
+    bibliotecaFaturasId = drv ? drv.id : null;
+  } catch (e) {
+    console.warn('Não consegui obter ID da biblioteca de faturas:', e);
+    bibliotecaFaturasId = null;
+  }
 }
 
 // ══════════════════════════════════════════════════════════════════
@@ -514,6 +531,8 @@ async function inicializarSite() {
 async function carregarContabilidade() {
   document.getElementById('cb-loading').style.display = 'flex';
   document.getElementById('cb-list').style.display = 'none';
+  // Invalidar cache de extratos para forçar nova procura no SharePoint
+  extratoCacheMes = { chave: '', urls: { Principal: '', Secundaria: '' } };
 
   try {
     if (!listaId) await inicializarSite();
@@ -592,6 +611,8 @@ function filtrarContabilidade() {
 
   atualizarMetricas(lista, mes, ano);
   renderLista(lista);
+  // Atualizar estado dos botões "Ver Extrato" sempre que o mês/ano muda
+  atualizarBotoesExtrato();
 }
 
 function isConciliado(i) {
@@ -727,6 +748,71 @@ function renderLista(lista) {
   }).join('');
 
   el.innerHTML = info + html;
+}
+
+// ══════════════════════════════════════════════════════════════════
+// EXTRATOS BANCÁRIOS — procura no SharePoint pelos PDFs com nome
+// "Extrato_Principal_{Mes}_{Ano}.pdf" e "Extrato_Secundaria_{Mes}_{Ano}.pdf"
+// na pasta YYYY/MM Mes da biblioteca FATURAS_View.
+// ══════════════════════════════════════════════════════════════════
+const contaKey = c => (c === 'Secundária' || c === 'Secundaria') ? 'Secundaria' : 'Principal';
+
+async function procurarExtratosMes(mes, ano) {
+  if (!bibliotecaFaturasId) return { Principal: '', Secundaria: '' };
+  const mesIdx = MESES_PT.indexOf(mes);
+  if (mesIdx < 0) return { Principal: '', Secundaria: '' };
+  const mesPasta = String(mesIdx + 1).padStart(2, '0') + ' ' + mes;
+  try {
+    const path = `${ano}/${encodeURIComponent(mesPasta)}`;
+    const url = `${GRAPH_BASE}/drives/${bibliotecaFaturasId}/root:/${path}:/children?$select=name,webUrl&$top=200`;
+    const r = await fetch(url, { headers: { 'Authorization': 'Bearer ' + graphToken } });
+    if (!r.ok) return { Principal: '', Secundaria: '' };
+    const data = await r.json();
+    const itens = data.value || [];
+    const out = { Principal: '', Secundaria: '' };
+    itens.forEach(it => {
+      const n = (it.name || '');
+      if (/^Extrato_Principal[_\.]/i.test(n)) out.Principal = it.webUrl || '';
+      else if (/^Extrato_Secundaria[_\.]/i.test(n)) out.Secundaria = it.webUrl || '';
+    });
+    return out;
+  } catch (e) {
+    console.error('procurarExtratosMes:', e);
+    return { Principal: '', Secundaria: '' };
+  }
+}
+
+async function abrirExtrato(conta) {
+  const mes = document.getElementById('cb-filtro-mes').value || MESES_PT[new Date().getMonth()];
+  const ano = parseInt(document.getElementById('cb-filtro-ano').value || new Date().getFullYear(), 10);
+  const chave = ano + '-' + mes;
+  if (extratoCacheMes.chave !== chave) {
+    extratoCacheMes = { chave, urls: await procurarExtratosMes(mes, ano) };
+  }
+  const url = extratoCacheMes.urls[contaKey(conta)] || '';
+  if (url) window.open(url, '_blank');
+  else alert(`Sem extrato ${conta} para ${mes} ${ano}.\nO ficheiro deve chamar-se "Extrato_${contaKey(conta)}_${mes}_${ano}.pdf" e estar na pasta deste mês.`);
+}
+
+async function atualizarBotoesExtrato() {
+  const mes = document.getElementById('cb-filtro-mes').value || MESES_PT[new Date().getMonth()];
+  const ano = parseInt(document.getElementById('cb-filtro-ano').value || new Date().getFullYear(), 10);
+  const chave = ano + '-' + mes;
+  // Atualizar consulta apenas se o mês/ano mudou
+  if (extratoCacheMes.chave !== chave) {
+    extratoCacheMes = { chave, urls: await procurarExtratosMes(mes, ano) };
+  }
+  ['Principal', 'Secundária'].forEach(conta => {
+    const url = extratoCacheMes.urls[contaKey(conta)] || '';
+    const btnId = conta === 'Principal' ? 'btn-extrato-p' : 'btn-extrato-s';
+    const btn = document.getElementById(btnId);
+    if (!btn) return;
+    btn.disabled = !url;
+    btn.style.opacity = url ? '1' : '.45';
+    btn.style.cursor = url ? 'pointer' : 'not-allowed';
+    btn.title = url ? `Abrir extrato ${conta} de ${mes} ${ano}` : `Sem extrato ${conta} para ${mes} ${ano}`;
+    btn.innerHTML = url ? `📄 Extrato ${conta} ✓` : `📎 Extrato ${conta}`;
+  });
 }
 
 // ══════════════════════════════════════════════════════════════════
