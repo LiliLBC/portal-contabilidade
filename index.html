@@ -1,0 +1,871 @@
+<!DOCTYPE html>
+<html lang="pt">
+<head>
+<meta charset="UTF-8">
+<meta name="viewport" content="width=device-width, initial-scale=1.0">
+<title>LBC Solicitadora — Contabilidade</title>
+<link href="https://fonts.googleapis.com/css2?family=DM+Sans:wght@300;400;500;600&family=DM+Mono:wght@400;500&display=swap" rel="stylesheet">
+
+<!-- MSAL.js para autenticação Microsoft -->
+<script src="https://alcdn.msauth.net/browser/2.38.3/js/msal-browser.min.js"></script>
+<!-- SheetJS para exportação Excel -->
+<script src="https://cdnjs.cloudflare.com/ajax/libs/xlsx/0.18.5/xlsx.full.min.js"></script>
+
+<style>
+:root{
+  /* Cores LBC — paleta solicitadora (rosé/terracota do logo) */
+  --bg:#F7F6F3;
+  --surface:#fff;
+  --surface2:#F2F1EE;
+  --border:#E4E2DC;
+  --border-strong:#C8C5BC;
+  --text:#1A1916;
+  --text-muted:#6B6860;
+  --text-faint:#9D9B94;
+  --accent:#A67550;       /* tom rosé do logo */
+  --accent-light:#F5EDE5;
+  --accent-dark:#7A5538;
+  --green:#2D7D4F;
+  --green-light:#E8F5EE;
+  --amber:#A05C1A;
+  --amber-light:#FDF3E3;
+  --red:#B53A2F;
+  --red-light:#FDECEA;
+  --blue:#1A5FA0;
+  --blue-light:#E6F0FB;
+  --shadow:0 1px 3px rgba(0,0,0,.06);
+  --shadow-md:0 4px 12px rgba(0,0,0,.08);
+}
+
+*{box-sizing:border-box;margin:0;padding:0}
+body{font-family:'DM Sans',sans-serif;background:var(--bg);color:var(--text);font-size:14px;line-height:1.5;min-height:100vh}
+
+/* ─── LOGIN ─── */
+.login-screen{display:flex;align-items:center;justify-content:center;min-height:100vh;padding:1rem}
+.login-card{background:var(--surface);border:1px solid var(--border);border-radius:16px;padding:2.5rem 2rem;text-align:center;max-width:420px;width:100%;box-shadow:var(--shadow-md)}
+.login-logo{width:140px;height:140px;margin:0 auto 1.25rem;display:flex;align-items:center;justify-content:center}
+.login-logo img{max-width:100%;max-height:100%;object-fit:contain}
+.login-title{font-size:22px;font-weight:600;margin-bottom:.4rem;color:var(--accent-dark)}
+.login-sub{font-size:13px;color:var(--text-muted);margin-bottom:1.5rem;line-height:1.6}
+.login-btn{width:100%;padding:13px;background:var(--accent);color:#fff;border:none;border-radius:10px;font-size:14px;font-weight:500;cursor:pointer;font-family:'DM Sans',sans-serif;display:flex;align-items:center;justify-content:center;gap:10px;transition:background .15s}
+.login-btn:hover{background:var(--accent-dark)}
+.login-btn:disabled{opacity:.6;cursor:not-allowed}
+.login-error{margin-top:1rem;padding:.75rem;background:var(--red-light);color:var(--red);border-radius:8px;font-size:12px;display:none;text-align:left;line-height:1.5}
+.login-info{margin-top:1.25rem;padding:.75rem;background:var(--accent-light);color:var(--accent-dark);border-radius:8px;font-size:11px;line-height:1.5}
+
+/* ─── APP ─── */
+.app{display:none;min-height:100vh}
+
+/* Header */
+.header{background:var(--surface);border-bottom:1px solid var(--border);padding:.75rem 1.5rem;display:flex;align-items:center;justify-content:space-between;position:sticky;top:0;z-index:50;box-shadow:var(--shadow)}
+.header-left{display:flex;align-items:center;gap:.75rem}
+.header-logo{width:36px;height:36px;display:flex;align-items:center;justify-content:center}
+.header-logo img{max-width:100%;max-height:100%}
+.header-title{font-size:14px;font-weight:600;color:var(--accent-dark)}
+.header-sub{font-size:11px;color:var(--text-faint);margin-top:1px}
+.header-right{display:flex;align-items:center;gap:.6rem}
+.date-badge{font-family:'DM Mono',monospace;font-size:11px;color:var(--text-muted);background:var(--surface2);border:1px solid var(--border);padding:3px 9px;border-radius:5px}
+.user-chip{display:flex;align-items:center;gap:8px;background:var(--surface2);border:1px solid var(--border);padding:4px 10px 4px 4px;border-radius:20px}
+.user-avatar{width:26px;height:26px;border-radius:50%;background:var(--accent);color:#fff;font-size:11px;font-weight:600;display:flex;align-items:center;justify-content:center;flex-shrink:0}
+.user-name{font-size:12px;color:var(--text);font-weight:500}
+.btn-logout{padding:5px 10px;border:1px solid var(--border);border-radius:6px;background:transparent;color:var(--text-muted);font-size:11px;cursor:pointer;font-family:'DM Sans',sans-serif}
+.btn-logout:hover{background:var(--red-light);color:var(--red);border-color:var(--red)}
+
+/* Content */
+.content{padding:1.5rem;max-width:1600px;margin:0 auto}
+
+/* Loading */
+.loading-overlay{display:flex;align-items:center;justify-content:center;padding:3rem;flex-direction:column;gap:1rem}
+.spinner{width:28px;height:28px;border:2px solid var(--border);border-top-color:var(--accent);border-radius:50%;animation:spin .8s linear infinite}
+@keyframes spin{to{transform:rotate(360deg)}}
+.loading-text{font-size:12px;color:var(--text-faint)}
+
+/* Métricas */
+.metrics-row{display:grid;grid-template-columns:repeat(5,1fr);gap:.6rem;margin-bottom:1.25rem}
+.metric-card{background:var(--surface);border:1px solid var(--border);border-radius:10px;padding:1rem 1.1rem;box-shadow:var(--shadow)}
+.metric-card.warn{background:#FFF8E5;border-color:#F0C770}
+.metric-label{font-size:10px;font-weight:600;color:var(--text-faint);text-transform:uppercase;letter-spacing:.06em;margin-bottom:.4rem}
+.metric-value{font-size:24px;font-weight:300;line-height:1;font-family:'DM Mono',monospace;letter-spacing:-.5px}
+.metric-sub{font-size:11px;color:var(--text-faint);margin-top:.4rem}
+
+/* Botões */
+.btn{display:inline-flex;align-items:center;gap:5px;padding:6px 13px;border-radius:7px;border:1px solid var(--border);background:var(--surface);color:var(--text);font-size:12px;font-weight:500;cursor:pointer;font-family:'DM Sans',sans-serif;transition:all .15s;white-space:nowrap}
+.btn:hover{background:var(--surface2);border-color:var(--border-strong)}
+.btn:disabled{opacity:.5;cursor:not-allowed}
+.btn-primary{background:var(--accent);border-color:var(--accent);color:#fff}
+.btn-primary:hover{background:var(--accent-dark)}
+.btn-sm{padding:4px 10px;font-size:11px;border-radius:6px}
+
+/* Filtros */
+.filters-bar{background:var(--surface);border:1px solid var(--border);border-radius:10px;padding:.85rem 1rem;margin-bottom:1rem;display:flex;align-items:center;gap:.5rem;flex-wrap:wrap;box-shadow:var(--shadow)}
+.form-select{padding:6px 10px;border:1px solid var(--border);border-radius:6px;background:var(--surface);color:var(--text);font-size:12px;font-family:'DM Sans',sans-serif;cursor:pointer}
+.form-select:focus{outline:none;border-color:var(--accent);box-shadow:0 0 0 2px var(--accent-light)}
+.tipo-chips{display:flex;gap:0;border:1px solid var(--border);border-radius:7px;overflow:hidden}
+.tipo-chip{padding:6px 12px;font-size:11px;background:var(--surface);color:var(--text-muted);border:none;cursor:pointer;font-family:inherit;font-weight:500;border-right:1px solid var(--border)}
+.tipo-chip:last-child{border-right:none}
+.tipo-chip.active{background:var(--accent-light);color:var(--accent-dark);font-weight:600}
+.btn-limpar{padding:5px 10px;background:transparent;border:1px dashed var(--border-strong);border-radius:6px;color:var(--text-muted);font-size:11px;cursor:pointer;font-family:inherit}
+.btn-limpar:hover{background:var(--surface2);color:var(--text)}
+
+/* Dropdown exportar */
+.dropdown-wrap{position:relative}
+.dropdown-menu{display:none;position:absolute;top:calc(100% + 4px);right:0;background:var(--surface);border:1px solid var(--border);border-radius:8px;padding:.3rem;z-index:50;min-width:230px;box-shadow:var(--shadow-md)}
+.dropdown-menu.open{display:block}
+.dropdown-section{font-size:10px;color:var(--text-faint);padding:.3rem .5rem;text-transform:uppercase;letter-spacing:.05em;font-weight:600}
+.dropdown-item{padding:.5rem .6rem;cursor:pointer;font-size:12px;border-radius:6px;display:flex;align-items:center;gap:.5rem}
+.dropdown-item:hover{background:var(--surface2)}
+
+/* Lista */
+.list-container{background:var(--surface);border:1px solid var(--border);border-radius:10px;overflow:hidden;box-shadow:var(--shadow)}
+.results-info{padding:.6rem 1rem;font-size:11px;color:var(--text-muted);background:var(--surface2);border-bottom:1px solid var(--border)}
+.reg-list-item{display:flex;align-items:center;gap:.6rem;padding:.7rem 1rem;border-bottom:1px solid var(--border);transition:background .15s}
+.reg-list-item:hover{background:#FAFAF8}
+.reg-list-item:last-child{border-bottom:none}
+.reg-list-main{flex:1;min-width:0}
+.reg-list-nome{font-size:13px;font-weight:500;color:var(--text);margin-bottom:2px;display:flex;align-items:center;flex-wrap:wrap;gap:4px}
+.reg-list-meta{font-size:11px;color:var(--text-muted)}
+.reg-list-valor{font-size:14px;font-weight:600;font-family:'DM Mono',monospace;text-align:right;min-width:90px}
+.reg-list-actions{display:flex;gap:6px}
+
+.tag{display:inline-block;font-size:9px;font-weight:600;padding:1px 6px;border-radius:8px}
+.tag-pri{background:#EDE9FE;color:#4F4580}
+.tag-sec{background:#DBEAFE;color:#0369A1}
+.tag-grp{background:#E9D5FF;color:#5B21B6;cursor:pointer}
+.tag-rf{background:#FEE2E2;color:#991B1B}
+.tag-fat{background:#D4EDDA;color:#1E6E3A}
+.tag-sf{background:#FFE5D6;color:#A05C1A}
+
+.empty{padding:3rem;text-align:center;color:var(--text-faint);font-size:13px}
+
+/* Notice */
+.notice{padding:.75rem 1rem;border-radius:8px;font-size:12px;line-height:1.5}
+.notice-info{background:var(--blue-light);color:var(--blue);border:1px solid #B7D4ED}
+.notice-error{background:var(--red-light);color:var(--red);border:1px solid #F4BFB9}
+
+/* Toast */
+.toast-container{position:fixed;top:70px;right:1rem;z-index:1000;display:flex;flex-direction:column;gap:.5rem}
+.toast{padding:.85rem 1rem;background:var(--surface);border:1px solid var(--border);border-radius:8px;box-shadow:var(--shadow-md);font-size:12px;min-width:200px;animation:slideIn .25s ease}
+.toast-success{border-left:3px solid var(--green)}
+.toast-error{border-left:3px solid var(--red)}
+@keyframes slideIn{from{transform:translateX(100%);opacity:0}to{transform:translateX(0);opacity:1}}
+
+/* Section */
+.section-header{display:flex;align-items:center;justify-content:space-between;margin-bottom:.75rem}
+.section-title{font-size:14px;font-weight:600;color:var(--text)}
+
+/* Responsivo */
+@media (max-width:900px){
+  .metrics-row{grid-template-columns:repeat(2,1fr)}
+  .header{padding:.6rem 1rem}
+  .content{padding:1rem}
+}
+</style>
+</head>
+<body>
+
+<!-- ════════════════════ LOGIN SCREEN ════════════════════ -->
+<div class="login-screen" id="login-screen">
+  <div class="login-card">
+    <div class="login-logo">
+      <img src="logo.png" alt="LBC Solicitadora" onerror="this.style.display='none'">
+    </div>
+    <div class="login-title">LBC Solicitadora</div>
+    <div class="login-sub">Portal de Contabilidade<br><small style="color:var(--text-faint)">Consulta de movimentos e faturas</small></div>
+    <button class="login-btn" id="btn-login" onclick="tentarLogin()">
+      🔐 Entrar com Microsoft
+    </button>
+    <div class="login-error" id="login-error"></div>
+    <div class="login-info">
+      ℹ️ Use o seu email Microsoft (autorizado pela LBC Solicitadora). Se ainda não tem acesso, contacte a Liliana Cardoso.
+    </div>
+  </div>
+</div>
+
+<!-- ════════════════════ APP ════════════════════ -->
+<div class="app" id="app">
+  <header class="header">
+    <div class="header-left">
+      <div class="header-logo">
+        <img src="logo.png" alt="LBC" onerror="this.style.display='none'">
+      </div>
+      <div>
+        <div class="header-title">LBC Solicitadora — Contabilidade</div>
+        <div class="header-sub">Portal de consulta</div>
+      </div>
+    </div>
+    <div class="header-right">
+      <div class="date-badge" id="date-now">—</div>
+      <div class="user-chip">
+        <div class="user-avatar" id="user-avatar">?</div>
+        <div class="user-name" id="user-name">—</div>
+      </div>
+      <button class="btn-logout" onclick="fazerLogout()">Sair</button>
+    </div>
+  </header>
+
+  <main class="content">
+
+    <!-- Métricas -->
+    <div class="metrics-row">
+      <div class="metric-card">
+        <div class="metric-label">Despesas empresa</div>
+        <div class="metric-value" id="cb-total-despesa" style="color:var(--red)">—</div>
+        <div class="metric-sub" id="cb-mes-label">—</div>
+      </div>
+      <div class="metric-card">
+        <div class="metric-label">Pag. por conta cliente</div>
+        <div class="metric-value" id="cb-total-cliente" style="color:var(--amber)">—</div>
+        <div class="metric-sub">não são despesas</div>
+      </div>
+      <div class="metric-card">
+        <div class="metric-label">Total IVA</div>
+        <div class="metric-value" id="cb-total-iva" style="color:var(--accent)">—</div>
+        <div class="metric-sub">IVA suportado</div>
+      </div>
+      <div class="metric-card">
+        <div class="metric-label">⚠ Sem fatura</div>
+        <div class="metric-value" id="cb-sem-fatura" style="color:var(--red)">—</div>
+        <div class="metric-sub">despesas sem fatura</div>
+      </div>
+      <div class="metric-card warn">
+        <div class="metric-label">📋 Por conciliar</div>
+        <div class="metric-value" id="cb-por-conciliar" style="color:#856404">—</div>
+        <div class="metric-sub">extrato bancário</div>
+      </div>
+    </div>
+
+    <!-- Filtros -->
+    <div class="filters-bar">
+      <select class="form-select" id="cb-filtro-mes" onchange="filtrarContabilidade()">
+        <option value="">Todos os meses</option>
+        <option>Janeiro</option><option>Fevereiro</option><option>Março</option>
+        <option>Abril</option><option>Maio</option><option>Junho</option>
+        <option>Julho</option><option>Agosto</option><option>Setembro</option>
+        <option>Outubro</option><option>Novembro</option><option>Dezembro</option>
+      </select>
+
+      <select class="form-select" id="cb-filtro-ano" onchange="filtrarContabilidade()">
+        <option value="">Todos os anos</option>
+      </select>
+
+      <div class="tipo-chips">
+        <button class="tipo-chip active" data-tipo="Despesa empresa" onclick="setTipoChip(this)">💼 Despesa empresa</button>
+        <button class="tipo-chip" data-tipo="Pagamento por conta cliente" onclick="setTipoChip(this)">💳 Por conta cliente</button>
+        <button class="tipo-chip" data-tipo="" onclick="setTipoChip(this)">Todos</button>
+      </div>
+
+      <select class="form-select" id="cb-filtro-fatura" onchange="filtrarContabilidade()">
+        <option value="">Com/sem fatura</option>
+        <option>Com fatura</option>
+        <option>Sem fatura</option>
+      </select>
+
+      <select class="form-select" id="cb-filtro-conta" onchange="filtrarContabilidade()">
+        <option value="">Todas as contas</option>
+        <option value="Principal">Só Principal</option>
+        <option value="Secundária">Só Secundária</option>
+      </select>
+
+      <select class="form-select" id="cb-filtro-conciliado" onchange="filtrarContabilidade()">
+        <option value="">Conciliação: todos</option>
+        <option value="nao">Só não conciliados</option>
+        <option value="sim">Só conciliados</option>
+      </select>
+
+      <button class="btn-limpar" onclick="limparFiltros()">✕ Limpar filtros</button>
+
+      <div style="margin-left:auto;display:flex;gap:.5rem">
+        <button class="btn btn-sm" onclick="carregarContabilidade()">↺ Atualizar</button>
+        <div class="dropdown-wrap">
+          <button class="btn btn-sm btn-primary" onclick="toggleDropdown('drop-exportar')">⬇ Exportar ▾</button>
+          <div class="dropdown-menu" id="drop-exportar">
+            <div class="dropdown-section">Mês selecionado</div>
+            <div class="dropdown-item" onclick="exportarMes('Principal')">📅 Mês — Principal</div>
+            <div class="dropdown-item" onclick="exportarMes('Secundária')">📅 Mês — Secundária</div>
+            <div class="dropdown-item" onclick="exportarMes('')">📅 Mês — Todas as contas</div>
+            <div class="dropdown-section">Ano selecionado</div>
+            <div class="dropdown-item" onclick="exportarAno('Principal')">📆 Ano — Principal</div>
+            <div class="dropdown-item" onclick="exportarAno('Secundária')">📆 Ano — Secundária</div>
+            <div class="dropdown-item" onclick="exportarAno('')">📆 Ano — Todas as contas</div>
+          </div>
+        </div>
+      </div>
+    </div>
+
+    <!-- Lista -->
+    <div class="list-container">
+      <div id="cb-loading" class="loading-overlay">
+        <div class="spinner"></div>
+        <div class="loading-text">A carregar dados...</div>
+      </div>
+      <div id="cb-list" style="display:none"></div>
+    </div>
+  </main>
+</div>
+
+<!-- Toasts -->
+<div class="toast-container" id="toasts"></div>
+
+<script>
+// ══════════════════════════════════════════════════════════════════
+// CONFIGURAÇÃO
+// ══════════════════════════════════════════════════════════════════
+const CLIENT_ID = '63a27ccd-8b03-4a9f-b54e-ae45ef33837b';
+const TENANT_ID = '1642f083-ca35-4b92-9b43-21e2c478d5c3';
+// REDIRECT é detetado dinamicamente — funciona em localhost e GitHub Pages
+const REDIRECT = window.location.origin + window.location.pathname;
+const GRAPH_SCOPES = ['Sites.Read.All','Files.Read.All','User.Read'];
+const GRAPH_BASE = 'https://graph.microsoft.com/v1.0';
+
+const TENANT_HOST = 'lbcsolicitadorapt.sharepoint.com';
+const SITE_PATH = 'sites/lbc-contabilidade';   // ★ Site da contabilidade (espelho)
+const LISTA_NOME = 'Contabilidade_View';
+const BIBLIOTECA_NOME = 'FATURAS_View';
+
+// Tradução de links de faturas: o portal principal grava webUrls a apontar para
+// /sites/lbcsolicitadora2/FATURAS/... — temos de redirigi-las para o site espelho.
+const TRADUCAO_LINK = {
+  de: '/sites/lbcsolicitadora2/FATURAS/',
+  para: '/sites/lbc-contabilidade/FATURAS_View/'
+};
+// Versão URL-encoded (alguns webUrls vêm assim)
+const TRADUCAO_LINK_ENC = {
+  de: '/sites/lbcsolicitadora2/FATURAS/',
+  para: '/sites/lbc-contabilidade/FATURAS_View/'
+};
+
+// Mapeamento de campos da lista (igual ao portal principal)
+const CB = {
+  titulo: 'Title',
+  data: 'Data',
+  tipo: 'TipoDespesa',
+  categoria: 'Categoria',
+  descricao: 'Descricao',
+  valor: 'Valor',
+  iva: 'IVA',
+  meio: 'Meio_Pagamento',
+  conta: 'Conta',
+  cliente: 'Cliente_Associado',
+  faturaInterna: 'Fatura_Interna',
+  estadoFatura: 'Estado_Fatura_Externa',
+  ligacaoFatura: 'Ligacao_Fatura',
+  observacoes: 'Observacoes',
+  pagtoConjunto: 'Pagto_Conjunto',
+  refConjunta: 'Ref_Conjunta',
+  conciliado: 'Conciliado',
+  dataConciliacao: 'Data_Conciliacao',
+  retencaoFonte: 'Retencao_Fonte',
+  taxaRetencao: 'Taxa_Retencao',
+  valorLiquido: 'Valor_Liquido'
+};
+
+const MESES_PT = ['Janeiro','Fevereiro','Março','Abril','Maio','Junho','Julho','Agosto','Setembro','Outubro','Novembro','Dezembro'];
+
+// Utilizadores autorizados (lista local de salvaguarda)
+// O Azure AD já controla quem pode entrar, mas isto é uma camada extra.
+const EMAILS_AUTORIZADOS = [
+  'liliana.cardoso@lbc-solicitadora.pt',
+  'rosaliamarques@contasecompanhia.eu'
+];
+
+// ══════════════════════════════════════════════════════════════════
+// ESTADO
+// ══════════════════════════════════════════════════════════════════
+let msalApp = null;
+let graphToken = null;
+let contaAtual = null;
+let siteId = null;
+let listaId = null;
+let todosMovimentos = [];
+let tipoFiltro = 'Despesa empresa';
+
+// ══════════════════════════════════════════════════════════════════
+// AUTENTICAÇÃO
+// ══════════════════════════════════════════════════════════════════
+async function inicializarMsal() {
+  msalApp = new msal.PublicClientApplication({
+    auth: {
+      clientId: CLIENT_ID,
+      authority: `https://login.microsoftonline.com/${TENANT_ID}`,
+      redirectUri: REDIRECT
+    },
+    cache: { cacheLocation: 'sessionStorage' }
+  });
+  await msalApp.initialize();
+
+  // Lidar com retorno do redirect
+  const resp = await msalApp.handleRedirectPromise().catch(e => {
+    console.error('Erro no redirect:', e);
+    mostrarErroLogin('Erro ao iniciar sessão: ' + (e.message || e));
+    return null;
+  });
+
+  if (resp) {
+    contaAtual = resp.account;
+  } else {
+    const contas = msalApp.getAllAccounts();
+    if (contas.length > 0) contaAtual = contas[0];
+  }
+
+  if (contaAtual) {
+    await iniciarSessao();
+  }
+}
+
+async function tentarLogin() {
+  if (!msalApp) {
+    mostrarErroLogin('A carregar... aguarde 2 segundos.');
+    return;
+  }
+  document.getElementById('btn-login').disabled = true;
+  try {
+    await msalApp.loginRedirect({ scopes: GRAPH_SCOPES });
+  } catch (e) {
+    mostrarErroLogin('Não foi possível iniciar sessão: ' + (e.message || e));
+    document.getElementById('btn-login').disabled = false;
+  }
+}
+
+async function renovarToken() {
+  try {
+    const r = await msalApp.acquireTokenSilent({ scopes: GRAPH_SCOPES, account: contaAtual });
+    graphToken = r.accessToken;
+  } catch (e) {
+    await msalApp.acquireTokenRedirect({ scopes: GRAPH_SCOPES });
+  }
+}
+
+function fazerLogout() {
+  if (!msalApp) return;
+  msalApp.logoutRedirect();
+}
+
+function mostrarErroLogin(msg) {
+  const el = document.getElementById('login-error');
+  el.textContent = msg;
+  el.style.display = 'block';
+}
+
+async function iniciarSessao() {
+  // Validar email autorizado
+  const email = (contaAtual.username || '').toLowerCase();
+  if (!EMAILS_AUTORIZADOS.includes(email)) {
+    mostrarErroLogin('Esta conta não está autorizada a aceder ao portal. Contacte a Liliana Cardoso.');
+    document.getElementById('btn-login').disabled = false;
+    setTimeout(() => msalApp.logoutRedirect(), 4000);
+    return;
+  }
+
+  // Trocar para vista da app
+  document.getElementById('login-screen').style.display = 'none';
+  document.getElementById('app').style.display = 'block';
+
+  // Mostrar nome
+  const nome = contaAtual.name || email;
+  document.getElementById('user-name').textContent = nome.split(' ')[0];
+  document.getElementById('user-avatar').textContent = (nome[0] || '?').toUpperCase();
+
+  // Data atual
+  const hoje = new Date();
+  document.getElementById('date-now').textContent = hoje.toLocaleDateString('pt-PT');
+
+  // Renovar token e carregar dados
+  await renovarToken();
+  await inicializarSite();
+  await carregarContabilidade();
+}
+
+// ══════════════════════════════════════════════════════════════════
+// GRAPH API
+// ══════════════════════════════════════════════════════════════════
+async function graphGet(url) {
+  await renovarToken();
+  const r = await fetch(url, {
+    headers: { 'Authorization': 'Bearer ' + graphToken, 'Accept': 'application/json' }
+  });
+  if (!r.ok) {
+    const txt = await r.text().catch(() => '');
+    throw new Error(`Graph error ${r.status}: ${txt.substring(0, 200)}`);
+  }
+  return r.json();
+}
+
+async function inicializarSite() {
+  // Obter siteId
+  const siteData = await graphGet(`${GRAPH_BASE}/sites/${TENANT_HOST}:/${SITE_PATH}`);
+  siteId = siteData.id;
+
+  // Obter listaId da Contabilidade_View
+  const listas = await graphGet(`${GRAPH_BASE}/sites/${siteId}/lists?$filter=displayName eq '${LISTA_NOME}'`);
+  if (!listas.value || !listas.value.length) {
+    throw new Error(`Lista "${LISTA_NOME}" não encontrada no site.`);
+  }
+  listaId = listas.value[0].id;
+}
+
+// ══════════════════════════════════════════════════════════════════
+// CARREGAR DADOS
+// ══════════════════════════════════════════════════════════════════
+async function carregarContabilidade() {
+  document.getElementById('cb-loading').style.display = 'flex';
+  document.getElementById('cb-list').style.display = 'none';
+
+  try {
+    if (!listaId) await inicializarSite();
+
+    // Lista de campos a pedir
+    const campos = Object.values(CB).join(',');
+    let todos = [];
+    let url = `${GRAPH_BASE}/sites/${siteId}/lists/${listaId}/items?$expand=fields($select=${campos})&$top=500`;
+
+    // Paginação
+    while (url) {
+      const data = await graphGet(url);
+      todos = todos.concat((data.value || []).map(i => ({ id: i.id, ...i.fields })));
+      url = data['@odata.nextLink'] || null;
+    }
+
+    todosMovimentos = todos;
+
+    // Preencher selector de anos
+    preencherAnos();
+
+    // Default: mês atual
+    const sel = document.getElementById('cb-filtro-mes');
+    if (!sel.value) sel.value = MESES_PT[new Date().getMonth()];
+    const selA = document.getElementById('cb-filtro-ano');
+    if (!selA.value) selA.value = String(new Date().getFullYear());
+
+    filtrarContabilidade();
+  } catch (e) {
+    document.getElementById('cb-loading').innerHTML =
+      `<div class="notice notice-error" style="margin:1rem">Erro ao carregar dados: ${escHtml(e.message)}</div>`;
+    console.error(e);
+  }
+}
+
+function preencherAnos() {
+  const sel = document.getElementById('cb-filtro-ano');
+  const valorAtual = sel.value;
+  const anos = new Set();
+  todosMovimentos.forEach(m => {
+    if (m[CB.data]) anos.add(new Date(m[CB.data]).getFullYear());
+  });
+  const arr = [...anos].sort((a, b) => b - a);
+  sel.innerHTML = '<option value="">Todos os anos</option>' +
+    arr.map(a => `<option value="${a}">${a}</option>`).join('');
+  if (valorAtual && arr.includes(parseInt(valorAtual))) sel.value = valorAtual;
+}
+
+// ══════════════════════════════════════════════════════════════════
+// FILTRAR
+// ══════════════════════════════════════════════════════════════════
+function setTipoChip(btn) {
+  document.querySelectorAll('.tipo-chip').forEach(c => c.classList.remove('active'));
+  btn.classList.add('active');
+  tipoFiltro = btn.dataset.tipo || '';
+  filtrarContabilidade();
+}
+
+function filtrarContabilidade() {
+  const mes = document.getElementById('cb-filtro-mes').value;
+  const ano = document.getElementById('cb-filtro-ano').value;
+  const tipo = tipoFiltro;
+  const fatura = document.getElementById('cb-filtro-fatura').value;
+  const conta = document.getElementById('cb-filtro-conta').value;
+  const conc = document.getElementById('cb-filtro-conciliado').value;
+
+  let lista = todosMovimentos.slice();
+
+  if (mes) lista = lista.filter(i => i[CB.data] && MESES_PT[new Date(i[CB.data]).getMonth()] === mes);
+  if (ano) lista = lista.filter(i => i[CB.data] && new Date(i[CB.data]).getFullYear() === parseInt(ano));
+  if (tipo) lista = lista.filter(i => i[CB.tipo] === tipo);
+  if (fatura) lista = lista.filter(i => i[CB.estadoFatura] === fatura);
+  if (conta) lista = lista.filter(i => (i[CB.conta] || 'Principal') === conta);
+  if (conc === 'sim') lista = lista.filter(i => isConciliado(i));
+  else if (conc === 'nao') lista = lista.filter(i => !isConciliado(i));
+
+  atualizarMetricas(lista, mes, ano);
+  renderLista(lista);
+}
+
+function isConciliado(i) {
+  const v = i[CB.conciliado];
+  return v === true || v === 'Sim' || v === 'true' || v === 1;
+}
+
+function limparFiltros() {
+  document.getElementById('cb-filtro-mes').value = '';
+  document.getElementById('cb-filtro-ano').value = '';
+  document.getElementById('cb-filtro-fatura').value = '';
+  document.getElementById('cb-filtro-conta').value = '';
+  document.getElementById('cb-filtro-conciliado').value = '';
+  document.querySelectorAll('.tipo-chip').forEach(c => c.classList.remove('active'));
+  document.querySelector('.tipo-chip[data-tipo="Despesa empresa"]').classList.add('active');
+  tipoFiltro = 'Despesa empresa';
+  filtrarContabilidade();
+}
+
+// ══════════════════════════════════════════════════════════════════
+// MÉTRICAS
+// ══════════════════════════════════════════════════════════════════
+function atualizarMetricas(lista, mes, ano) {
+  const despesas = lista.filter(i => i[CB.tipo] === 'Despesa empresa');
+  const cliente = lista.filter(i => i[CB.tipo] === 'Pagamento por conta cliente');
+
+  const totalDesp = despesas.reduce((s, i) => s + (parseFloat(i[CB.valor]) || 0), 0);
+  const totalCli = cliente.reduce((s, i) => s + (parseFloat(i[CB.valor]) || 0), 0);
+  const totalIva = lista.reduce((s, i) => s + (parseFloat(i[CB.iva]) || 0), 0);
+  const semFatura = despesas.filter(i => i[CB.estadoFatura] === 'Sem fatura').length;
+  const porConciliar = lista.filter(i => !isConciliado(i)).length;
+
+  document.getElementById('cb-total-despesa').textContent = fmtEur(totalDesp);
+  document.getElementById('cb-total-cliente').textContent = fmtEur(totalCli);
+  document.getElementById('cb-total-iva').textContent = fmtEur(totalIva);
+  document.getElementById('cb-sem-fatura').textContent = semFatura;
+  document.getElementById('cb-por-conciliar').textContent = porConciliar;
+
+  const lbl = [mes, ano].filter(Boolean).join(' ') || 'Tudo';
+  document.getElementById('cb-mes-label').textContent = lbl;
+}
+
+// ══════════════════════════════════════════════════════════════════
+// RENDER LISTA
+// ══════════════════════════════════════════════════════════════════
+function renderLista(lista) {
+  document.getElementById('cb-loading').style.display = 'none';
+  const el = document.getElementById('cb-list');
+  el.style.display = 'block';
+
+  if (!lista.length) {
+    el.innerHTML = '<div class="empty">Nenhum movimento encontrado com estes filtros.</div>';
+    return;
+  }
+
+  // Ordenar por data desc
+  lista = [...lista].sort((a, b) => new Date(b[CB.data] || 0) - new Date(a[CB.data] || 0));
+
+  // Pré-calcular grupos (Ref_Conjunta)
+  const tamGrupo = {}, totGrupo = {};
+  todosMovimentos.forEach(m => {
+    const r = m[CB.refConjunta];
+    if (r) {
+      tamGrupo[r] = (tamGrupo[r] || 0) + 1;
+      totGrupo[r] = (totGrupo[r] || 0) + (parseFloat(m[CB.valor]) || 0);
+    }
+  });
+
+  const info = `<div class="results-info"><strong>${lista.length}</strong> ${lista.length === 1 ? 'movimento' : 'movimentos'} encontrados</div>`;
+
+  const html = lista.map(i => {
+    const isDespesa = i[CB.tipo] === 'Despesa empresa';
+    const val = parseFloat(i[CB.valor]) || 0;
+    const conta = i[CB.conta] || 'Principal';
+    const ref = i[CB.refConjunta] || '';
+    const conc = isConciliado(i);
+    const rfVal = parseFloat(i[CB.retencaoFonte]) || 0;
+
+    const contaTag = conta === 'Secundária'
+      ? '<span class="tag tag-sec">Secundária</span>'
+      : '<span class="tag tag-pri">Principal</span>';
+
+    const tipoIcon = isDespesa ? '💼' : '💳';
+
+    const refTag = ref
+      ? `<span class="tag tag-grp" title="Grupo de ${tamGrupo[ref] || 1} movimentos · total ${fmtEur(totGrupo[ref] || 0)}">🔗 ${escHtml(ref)}${tamGrupo[ref] > 1 ? ` (${tamGrupo[ref]})` : ''}</span>`
+      : '';
+
+    const rfTag = rfVal > 0
+      ? `<span class="tag tag-rf" title="Retenção na fonte">RF -${fmtEur(rfVal)}</span>`
+      : '';
+
+    const fatTag = i[CB.estadoFatura] === 'Com fatura'
+      ? '<span class="tag tag-fat">✓ Com fatura</span>'
+      : (i[CB.estadoFatura] === 'Sem fatura' && isDespesa
+          ? '<span class="tag tag-sf">⚠ Sem fatura</span>'
+          : '');
+
+    const concIcon = conc
+      ? '<span title="Conciliado" style="font-size:14px">🟢</span>'
+      : '<span title="Por conciliar" style="font-size:14px;opacity:.4">⚪</span>';
+
+    const linkFat = i[CB.ligacaoFatura];
+    const fatBtn = linkFat
+      ? `<a href="${escAttr(traduzirLinkFatura(linkFat))}" target="_blank" class="btn btn-sm" title="Ver fatura PDF">📄 Ver</a>`
+      : '';
+
+    const aggInfo = ref && tamGrupo[ref] > 1
+      ? `<div style="font-size:10px;color:#5B21B6;margin-top:2px">📋 Fatura agregada · ${tamGrupo[ref]} movimentos · total grupo: <strong>${fmtEur(totGrupo[ref] || 0)}</strong></div>`
+      : '';
+
+    return `<div class="reg-list-item" style="${conc ? 'opacity:.65;' : ''}">
+      ${concIcon}
+      <span style="font-size:16px">${tipoIcon}</span>
+      <div class="reg-list-main">
+        <div class="reg-list-nome">
+          ${contaTag}
+          <span>${escHtml(i[CB.descricao] || '—')}</span>
+          ${refTag} ${rfTag} ${fatTag}
+        </div>
+        <div class="reg-list-meta">
+          ${fmtData(i[CB.data])}
+          ${i[CB.categoria] ? ' · ' + escHtml(i[CB.categoria]) : ''}
+          ${i[CB.cliente] ? ' · ' + escHtml(i[CB.cliente]) : ''}
+          ${i[CB.faturaInterna] ? ' · ' + escHtml(i[CB.faturaInterna]) : ''}
+          ${i[CB.meio] ? ' · ' + escHtml(i[CB.meio]) : ''}
+        </div>
+        ${aggInfo}
+      </div>
+      <div class="reg-list-valor" style="color:${isDespesa ? 'var(--red)' : 'var(--amber)'}">${fmtEur(val)}</div>
+      <div class="reg-list-actions">${fatBtn}</div>
+    </div>`;
+  }).join('');
+
+  el.innerHTML = info + html;
+}
+
+// ══════════════════════════════════════════════════════════════════
+// TRADUÇÃO DE LINKS DE FATURAS
+// ══════════════════════════════════════════════════════════════════
+function traduzirLinkFatura(url) {
+  if (!url) return '#';
+  let r = url;
+  // Tentar tradução exata
+  if (r.indexOf(TRADUCAO_LINK.de) !== -1) {
+    r = r.replace(TRADUCAO_LINK.de, TRADUCAO_LINK.para);
+  }
+  // Para versão URL-encoded da rota (caso o webUrl use %20 etc)
+  return r;
+}
+
+// ══════════════════════════════════════════════════════════════════
+// EXPORTAR EXCEL
+// ══════════════════════════════════════════════════════════════════
+function exportarMes(contaFiltro) {
+  fecharDropdowns();
+  const mes = document.getElementById('cb-filtro-mes').value || MESES_PT[new Date().getMonth()];
+  const ano = document.getElementById('cb-filtro-ano').value || String(new Date().getFullYear());
+
+  let lista = todosMovimentos.filter(i => {
+    if (!i[CB.data]) return false;
+    const d = new Date(i[CB.data]);
+    return MESES_PT[d.getMonth()] === mes && d.getFullYear() === parseInt(ano);
+  });
+  if (contaFiltro) lista = lista.filter(i => (i[CB.conta] || 'Principal') === contaFiltro);
+
+  if (!lista.length) { mostrarToast('Sem movimentos para exportar', 'error'); return; }
+
+  const tit = `Mapa-Contabilidade-${mes}-${ano}${contaFiltro ? '-' + contaFiltro : ''}`;
+  gerarExcel(lista, tit, `${mes} ${ano}${contaFiltro ? ' — ' + contaFiltro : ''}`);
+}
+
+function exportarAno(contaFiltro) {
+  fecharDropdowns();
+  const ano = document.getElementById('cb-filtro-ano').value || String(new Date().getFullYear());
+
+  let lista = todosMovimentos.filter(i => {
+    if (!i[CB.data]) return false;
+    return new Date(i[CB.data]).getFullYear() === parseInt(ano);
+  });
+  if (contaFiltro) lista = lista.filter(i => (i[CB.conta] || 'Principal') === contaFiltro);
+
+  if (!lista.length) { mostrarToast('Sem movimentos para exportar', 'error'); return; }
+
+  const tit = `Mapa-Contabilidade-${ano}${contaFiltro ? '-' + contaFiltro : ''}`;
+  gerarExcel(lista, tit, `Ano ${ano}${contaFiltro ? ' — ' + contaFiltro : ''}`);
+}
+
+function gerarExcel(lista, fileName, periodo) {
+  // Ordenar por data
+  lista = [...lista].sort((a, b) => new Date(a[CB.data] || 0) - new Date(b[CB.data] || 0));
+
+  const linhas = lista.map(i => ({
+    'Data': i[CB.data] ? new Date(i[CB.data]).toLocaleDateString('pt-PT') : '',
+    'Tipo': i[CB.tipo] || '',
+    'Categoria': i[CB.categoria] || '',
+    'Descrição': i[CB.descricao] || '',
+    'Cliente': i[CB.cliente] || '',
+    'Nº Fatura interna': i[CB.faturaInterna] || '',
+    'Estado fatura': i[CB.estadoFatura] || '',
+    'Valor (€)': parseFloat(i[CB.valor]) || 0,
+    'IVA (€)': parseFloat(i[CB.iva]) || 0,
+    'Retenção fonte (€)': parseFloat(i[CB.retencaoFonte]) || 0,
+    'Taxa retenção (%)': parseFloat(i[CB.taxaRetencao]) || 0,
+    'Valor líquido (€)': parseFloat(i[CB.valorLiquido]) || (parseFloat(i[CB.valor]) || 0),
+    'Meio pagamento': i[CB.meio] || '',
+    'Conta': i[CB.conta] || 'Principal',
+    'Ref. agrupamento': i[CB.refConjunta] || '',
+    'Conciliado': isConciliado(i) ? 'Sim' : 'Não',
+    'Data conciliação': i[CB.dataConciliacao] ? new Date(i[CB.dataConciliacao]).toLocaleDateString('pt-PT') : '',
+    'Observações': i[CB.observacoes] || '',
+    'Link fatura': traduzirLinkFatura(i[CB.ligacaoFatura] || '')
+  }));
+
+  // Totais
+  const totDesp = lista.filter(i => i[CB.tipo] === 'Despesa empresa').reduce((s, i) => s + (parseFloat(i[CB.valor]) || 0), 0);
+  const totCli = lista.filter(i => i[CB.tipo] === 'Pagamento por conta cliente').reduce((s, i) => s + (parseFloat(i[CB.valor]) || 0), 0);
+  const totIva = lista.reduce((s, i) => s + (parseFloat(i[CB.iva]) || 0), 0);
+
+  linhas.push({});
+  linhas.push({ 'Data': 'TOTAIS', 'Valor (€)': totDesp + totCli, 'IVA (€)': totIva });
+  linhas.push({ 'Data': 'Despesas empresa', 'Valor (€)': totDesp });
+  linhas.push({ 'Data': 'Pag. por conta cliente', 'Valor (€)': totCli });
+
+  const ws = XLSX.utils.json_to_sheet(linhas);
+
+  // Larguras razoáveis
+  ws['!cols'] = [
+    { wch: 11 }, { wch: 22 }, { wch: 18 }, { wch: 38 }, { wch: 22 }, { wch: 14 },
+    { wch: 12 }, { wch: 11 }, { wch: 10 }, { wch: 14 }, { wch: 13 }, { wch: 14 },
+    { wch: 16 }, { wch: 11 }, { wch: 16 }, { wch: 11 }, { wch: 14 }, { wch: 30 }, { wch: 50 }
+  ];
+
+  const wb = XLSX.utils.book_new();
+  XLSX.utils.book_append_sheet(wb, ws, periodo.substring(0, 30));
+  XLSX.writeFile(wb, `${fileName}.xlsx`);
+
+  mostrarToast(`✓ Exportado: ${fileName}.xlsx`, 'success');
+}
+
+// ══════════════════════════════════════════════════════════════════
+// UI HELPERS
+// ══════════════════════════════════════════════════════════════════
+function toggleDropdown(id) {
+  const el = document.getElementById(id);
+  const aberto = el.classList.contains('open');
+  fecharDropdowns();
+  if (!aberto) el.classList.add('open');
+}
+function fecharDropdowns() {
+  document.querySelectorAll('.dropdown-menu').forEach(d => d.classList.remove('open'));
+}
+document.addEventListener('click', e => {
+  if (!e.target.closest('.dropdown-wrap')) fecharDropdowns();
+});
+
+function fmtData(iso) { if (!iso) return '—'; return new Date(iso).toLocaleDateString('pt-PT'); }
+function fmtEur(v) { return (v || 0).toLocaleString('pt-PT', { minimumFractionDigits: 2, maximumFractionDigits: 2 }) + ' €'; }
+function escHtml(s) { return String(s == null ? '' : s).replace(/&/g, '&amp;').replace(/"/g, '&quot;').replace(/</g, '&lt;').replace(/>/g, '&gt;'); }
+function escAttr(s) { return escHtml(s).replace(/'/g, '&#39;'); }
+
+function mostrarToast(msg, tipo) {
+  const c = document.getElementById('toasts');
+  const t = document.createElement('div');
+  t.className = 'toast toast-' + (tipo || 'success');
+  t.textContent = msg;
+  c.appendChild(t);
+  setTimeout(() => { t.style.opacity = '0'; t.style.transform = 'translateX(100%)'; t.style.transition = 'all .3s'; }, 2700);
+  setTimeout(() => t.remove(), 3100);
+}
+
+// ══════════════════════════════════════════════════════════════════
+// ARRANCAR
+// ══════════════════════════════════════════════════════════════════
+inicializarMsal().catch(e => {
+  console.error('Erro inicialização MSAL:', e);
+  mostrarErroLogin('Erro a inicializar autenticação: ' + (e.message || e));
+});
+</script>
+
+</body>
+</html>
