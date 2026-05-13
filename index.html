@@ -337,15 +337,10 @@ body{font-family:'DM Sans',sans-serif;background:var(--bg);color:var(--text);fon
       </div>
 
       <div style="margin-bottom:1rem">
-        <div style="font-size:11px;color:var(--text-muted);margin-bottom:.4rem">Categorias a incluir</div>
-        <label style="display:flex;align-items:center;gap:.5rem;padding:.5rem;border:0.5px solid var(--border-soft);border-radius:6px;margin-bottom:4px;cursor:pointer">
-          <input type="checkbox" id="ef-cat-empresa" checked>
-          <span style="font-size:12px">🏢 Despesas da empresa</span>
-        </label>
-        <label style="display:flex;align-items:center;gap:.5rem;padding:.5rem;border:0.5px solid var(--border-soft);border-radius:6px;cursor:pointer">
-          <input type="checkbox" id="ef-cat-cliente" checked>
-          <span style="font-size:12px">💳 Por conta do cliente</span>
-        </label>
+        <div style="font-size:11px;color:var(--text-muted);margin-bottom:.4rem">Categoria</div>
+        <div style="padding:.5rem;border:0.5px solid var(--border-soft);border-radius:6px;background:var(--bg-secondary);font-size:12px">
+          🏢 <strong>Despesas da empresa</strong>
+        </div>
       </div>
 
       <div id="ef-info" style="font-size:11px;color:var(--text-muted);background:var(--bg-secondary);padding:.5rem;border-radius:6px;margin-bottom:1rem"></div>
@@ -1134,8 +1129,6 @@ function abrirModalExportarFaturas() {
   // Listeners
   selMes.onchange = atualizarInfoExportFaturas;
   selAno.onchange = atualizarInfoExportFaturas;
-  document.getElementById('ef-cat-empresa').onchange = atualizarInfoExportFaturas;
-  document.getElementById('ef-cat-cliente').onchange = atualizarInfoExportFaturas;
   modal.style.display = 'flex';
 }
 
@@ -1146,33 +1139,23 @@ function fecharModalExportarFaturas() {
 function atualizarInfoExportFaturas() {
   const mes = parseInt(document.getElementById('ef-mes').value);
   const ano = parseInt(document.getElementById('ef-ano').value);
-  const incEmp = document.getElementById('ef-cat-empresa').checked;
-  const incCli = document.getElementById('ef-cat-cliente').checked;
-  const movs = movimentosFiltradosParaExport(mes, ano, incEmp, incCli);
+  const movs = movimentosFiltradosParaExport(mes, ano);
   const comFatura = movs.filter(m => m[CB.ligacaoFatura]);
   const semFatura = movs.length - comFatura.length;
   const info = document.getElementById('ef-info');
-  if (!incEmp && !incCli) {
-    info.innerHTML = '<span style="color:#92400E">⚠️ Seleciona pelo menos uma categoria.</span>';
-    return;
-  }
   if (movs.length === 0) {
-    info.innerHTML = `Sem movimentos no período selecionado.`;
+    info.innerHTML = `Sem despesas da empresa no período selecionado.`;
     return;
   }
-  info.innerHTML = `<strong>${movs.length}</strong> movimento(s) — <strong>${comFatura.length}</strong> com fatura anexada${semFatura > 0 ? `, ${semFatura} sem fatura (ficarão só listados)` : ''}.`;
+  info.innerHTML = `<strong>${movs.length}</strong> despesa(s) da empresa — <strong>${comFatura.length}</strong> com fatura anexada${semFatura > 0 ? `, ${semFatura} sem fatura (ficarão só listadas)` : ''}.`;
 }
 
-function movimentosFiltradosParaExport(mes, ano, incEmp, incCli) {
+function movimentosFiltradosParaExport(mes, ano) {
   return (todosMovimentos || []).filter(i => {
     if (!i[CB.data]) return false;
     const d = new Date(i[CB.data]);
     if (d.getMonth() !== mes || d.getFullYear() !== ano) return false;
-    const tipo = i[CB.tipo] || '';
-    if (tipo === 'Despesa empresa' && !incEmp) return false;
-    if (tipo === 'Pagamento por conta cliente' && !incCli) return false;
-    if (tipo !== 'Despesa empresa' && tipo !== 'Pagamento por conta cliente') return false;
-    return true;
+    return (i[CB.tipo] || '') === 'Despesa empresa';
   }).sort((a, b) => {
     const da = new Date(a[CB.data]).getTime();
     const db = new Date(b[CB.data]).getTime();
@@ -1193,15 +1176,9 @@ function carregarScriptDinamico(src) {
 async function gerarPDFFaturas() {
   const mes = parseInt(document.getElementById('ef-mes').value);
   const ano = parseInt(document.getElementById('ef-ano').value);
-  const incEmp = document.getElementById('ef-cat-empresa').checked;
-  const incCli = document.getElementById('ef-cat-cliente').checked;
-  if (!incEmp && !incCli) {
-    toast('Seleciona pelo menos uma categoria', 'error');
-    return;
-  }
-  const movs = movimentosFiltradosParaExport(mes, ano, incEmp, incCli);
+  const movs = movimentosFiltradosParaExport(mes, ano);
   if (!movs.length) {
-    toast('Sem movimentos no período selecionado', 'error');
+    toast('Sem despesas da empresa no período selecionado', 'error');
     return;
   }
 
@@ -1230,15 +1207,14 @@ async function gerarPDFFaturas() {
     // Processar cada movimento
     const mesNome = MESES_PT[mes];
     const totalMovs = movs.length;
-    let totalEmpresa = 0, totalCliente = 0;
+    let totalEmpresa = 0;
     const indiceEntries = []; // {idx, data, descricao, tipo, valor, pagina (a preencher)}
 
     // Vamos primeiro gerar todas as páginas das faturas, depois fazer capa+índice e juntar tudo no fim
     for (let i = 0; i < movs.length; i++) {
       const mov = movs[i];
       const valor = parseFloat(mov[CB.valor]) || 0;
-      if (mov[CB.tipo] === 'Despesa empresa') totalEmpresa += valor;
-      else totalCliente += valor;
+      totalEmpresa += valor;
 
       const pct = 5 + Math.floor((i / totalMovs) * 85);
       setProg(pct, `${i + 1} de ${totalMovs}: ${(mov[CB.descricao] || '—').substring(0, 50)}`, 'A processar faturas');
@@ -1349,20 +1325,11 @@ async function gerarPDFFaturas() {
     cy -= 40;
     capa.drawText(`${mesNome} ${ano}`, { x: 50, y: cy, size: 20, font: capaFont, color: rgb(0.3, 0.3, 0.3) });
     cy -= 60;
-    const cats = [];
-    if (incEmp) cats.push('Despesas da empresa');
-    if (incCli) cats.push('Por conta do cliente');
-    capa.drawText(`Categorias: ${cats.join(' + ')}`, { x: 50, y: cy, size: 11, font: capaFont });
+    capa.drawText(`Categoria: Despesas da empresa`, { x: 50, y: cy, size: 11, font: capaFont });
     cy -= 25;
     capa.drawText(`Total de movimentos: ${movs.length}`, { x: 50, y: cy, size: 11, font: capaFont });
-    if (incEmp) {
-      cy -= 18;
-      capa.drawText(`Total Despesas Empresa: ${totalEmpresa.toLocaleString('pt-PT', { minimumFractionDigits: 2 })} €`, { x: 50, y: cy, size: 11, font: capaFont });
-    }
-    if (incCli) {
-      cy -= 18;
-      capa.drawText(`Total Por Conta Cliente: ${totalCliente.toLocaleString('pt-PT', { minimumFractionDigits: 2 })} €`, { x: 50, y: cy, size: 11, font: capaFont });
-    }
+    cy -= 18;
+    capa.drawText(`Total: ${totalEmpresa.toLocaleString('pt-PT', { minimumFractionDigits: 2 })} €`, { x: 50, y: cy, size: 11, font: capaFontBold });
     cy -= 30;
     capa.drawText(`Gerado em ${new Date().toLocaleDateString('pt-PT')} ${new Date().toLocaleTimeString('pt-PT')}`, { x: 50, y: cy, size: 9, font: capaFont, color: rgb(0.5, 0.5, 0.5) });
 
@@ -1410,8 +1377,7 @@ async function gerarPDFFaturas() {
     const url = URL.createObjectURL(blob);
     const a = document.createElement('a');
     a.href = url;
-    const sufixo = (incEmp && incCli) ? 'Todas' : (incEmp ? 'Empresa' : 'Cliente');
-    a.download = `Faturas_${ano}-${String(mes + 1).padStart(2, '0')}_${sufixo}.pdf`;
+    a.download = `Faturas_${ano}-${String(mes + 1).padStart(2, '0')}_Empresa.pdf`;
     document.body.appendChild(a);
     a.click();
     a.remove();
@@ -1420,7 +1386,7 @@ async function gerarPDFFaturas() {
     setProg(100, '✓ Concluído!');
     setTimeout(() => {
       fecharModalExportarFaturas();
-      toast(`✓ PDF gerado: ${movs.length} movimentos`, 'success');
+      toast(`✓ PDF gerado: ${movs.length} despesa(s) da empresa`, 'success');
     }, 600);
 
   } catch (e) {
