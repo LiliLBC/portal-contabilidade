@@ -296,6 +296,8 @@ body{font-family:'DM Sans',sans-serif;background:var(--bg);color:var(--text);fon
             <div class="dropdown-item" onclick="exportarAno('Principal')">📆 Ano — Principal</div>
             <div class="dropdown-item" onclick="exportarAno('Secundária')">📆 Ano — Secundária</div>
             <div class="dropdown-item" onclick="exportarAno('')">📆 Ano — Todas as contas</div>
+            <div class="dropdown-section">Faturas (PDF único)</div>
+            <div class="dropdown-item" onclick="abrirModalExportarFaturas()">📥 PDF mensal de faturas</div>
           </div>
         </div>
       </div>
@@ -310,6 +312,58 @@ body{font-family:'DM Sans',sans-serif;background:var(--bg);color:var(--text);fon
       <div id="cb-list" style="display:none"></div>
     </div>
   </main>
+</div>
+
+<!-- Modal: Exportar PDF de Faturas -->
+<div class="modal-bg" id="modal-export-faturas" style="display:none;position:fixed;inset:0;background:rgba(0,0,0,.5);z-index:1000;align-items:center;justify-content:center">
+  <div style="background:var(--bg-primary);border-radius:10px;padding:1.5rem;max-width:480px;width:90%;box-shadow:0 10px 40px rgba(0,0,0,.2)">
+    <div style="display:flex;justify-content:space-between;align-items:center;margin-bottom:1rem">
+      <h3 style="margin:0;font-size:16px;color:var(--text-strong)">📥 Exportar PDF de Faturas</h3>
+      <button onclick="fecharModalExportarFaturas()" style="background:transparent;border:none;font-size:20px;cursor:pointer;color:var(--text-muted)">×</button>
+    </div>
+
+    <div id="ef-form">
+      <p style="font-size:12px;color:var(--text-muted);margin:0 0 1rem">Gera um PDF único com todas as faturas do mês selecionado, com capa e índice.</p>
+
+      <div style="display:grid;grid-template-columns:1fr 1fr;gap:.5rem;margin-bottom:1rem">
+        <div>
+          <label style="font-size:11px;color:var(--text-muted)">Mês</label>
+          <select id="ef-mes" class="form-select" style="width:100%"></select>
+        </div>
+        <div>
+          <label style="font-size:11px;color:var(--text-muted)">Ano</label>
+          <select id="ef-ano" class="form-select" style="width:100%"></select>
+        </div>
+      </div>
+
+      <div style="margin-bottom:1rem">
+        <div style="font-size:11px;color:var(--text-muted);margin-bottom:.4rem">Categorias a incluir</div>
+        <label style="display:flex;align-items:center;gap:.5rem;padding:.5rem;border:0.5px solid var(--border-soft);border-radius:6px;margin-bottom:4px;cursor:pointer">
+          <input type="checkbox" id="ef-cat-empresa" checked>
+          <span style="font-size:12px">🏢 Despesas da empresa</span>
+        </label>
+        <label style="display:flex;align-items:center;gap:.5rem;padding:.5rem;border:0.5px solid var(--border-soft);border-radius:6px;cursor:pointer">
+          <input type="checkbox" id="ef-cat-cliente" checked>
+          <span style="font-size:12px">💳 Por conta do cliente</span>
+        </label>
+      </div>
+
+      <div id="ef-info" style="font-size:11px;color:var(--text-muted);background:var(--bg-secondary);padding:.5rem;border-radius:6px;margin-bottom:1rem"></div>
+
+      <div style="display:flex;gap:.5rem;justify-content:flex-end">
+        <button class="btn btn-sm" onclick="fecharModalExportarFaturas()">Cancelar</button>
+        <button class="btn btn-sm btn-primary" onclick="gerarPDFFaturas()">📥 Gerar PDF</button>
+      </div>
+    </div>
+
+    <div id="ef-progresso" style="display:none">
+      <p style="font-size:13px;color:var(--text-strong);margin:0 0 .75rem"><span id="ef-prog-titulo">A processar...</span></p>
+      <div style="background:var(--bg-secondary);border-radius:6px;overflow:hidden;height:8px;margin-bottom:.5rem">
+        <div id="ef-prog-bar" style="background:var(--text-strong);height:100%;width:0%;transition:width .3s"></div>
+      </div>
+      <p style="font-size:11px;color:var(--text-muted);margin:0" id="ef-prog-texto"></p>
+    </div>
+  </div>
 </div>
 
 <!-- Toasts -->
@@ -1009,6 +1063,372 @@ function mostrarToast(msg, tipo) {
   c.appendChild(t);
   setTimeout(() => { t.style.opacity = '0'; t.style.transform = 'translateX(100%)'; t.style.transition = 'all .3s'; }, 2700);
   setTimeout(() => t.remove(), 3100);
+}
+
+// Baixar uma fatura a partir do seu webUrl. Usa o endpoint Graph /shares
+// que permite aceder a items pelo URL (suporta encoding "u!base64url").
+async function baixarFaturaPorWebUrl(webUrl) {
+  if (!webUrl) return null;
+  // 1ª tentativa: traduzir para o site espelho (ex-link contabilidade-view) e usar /shares
+  const url1 = traduzirLinkFatura(webUrl);
+  let buf = await tentarBaixarComShares(url1);
+  if (buf) return buf;
+  // 2ª tentativa: usar a URL original sem tradução
+  if (url1 !== webUrl) {
+    buf = await tentarBaixarComShares(webUrl);
+    if (buf) return buf;
+  }
+  return null;
+}
+
+async function tentarBaixarComShares(webUrl) {
+  try {
+    // Codificar como "share ID" — base64url(prefixo "u!" + webUrl)
+    // Spec: https://learn.microsoft.com/en-us/graph/api/shares-get
+    const encoder = new TextEncoder();
+    const bytes = encoder.encode(webUrl);
+    let bin = '';
+    for (let i = 0; i < bytes.length; i++) bin += String.fromCharCode(bytes[i]);
+    const b64 = btoa(bin).replace(/=+$/, '').replace(/\//g, '_').replace(/\+/g, '-');
+    const shareId = 'u!' + b64;
+    const r = await fetch(`${GRAPH_BASE}/shares/${shareId}/driveItem/content`, {
+      headers: { 'Authorization': 'Bearer ' + graphToken }
+    });
+    if (!r.ok) {
+      console.warn('Falha /shares para', webUrl, '— HTTP', r.status);
+      return null;
+    }
+    return await r.arrayBuffer();
+  } catch (e) {
+    console.warn('Erro /shares:', e);
+    return null;
+  }
+}
+
+// ══════════════════════════════════════════════════════════════════
+// EXPORTAR PDF DE FATURAS
+// ══════════════════════════════════════════════════════════════════
+function abrirModalExportarFaturas() {
+  fecharDropdowns();
+  const modal = document.getElementById('modal-export-faturas');
+  // Popular dropdowns de mês e ano
+  const selMes = document.getElementById('ef-mes');
+  const selAno = document.getElementById('ef-ano');
+  if (selMes.options.length === 0) {
+    selMes.innerHTML = MESES_PT.map((m, i) => `<option value="${i}">${m}</option>`).join('');
+    const anoAtual = new Date().getFullYear();
+    const anos = [];
+    for (let a = anoAtual; a >= anoAtual - 3; a--) anos.push(a);
+    selAno.innerHTML = anos.map(a => `<option value="${a}">${a}</option>`).join('');
+  }
+  // Seleciona mês/ano dos filtros principais se possível
+  const filtroMes = document.getElementById('cb-filtro-mes')?.value;
+  const filtroAno = document.getElementById('cb-filtro-ano')?.value;
+  if (filtroMes && MESES_PT.includes(filtroMes)) selMes.value = MESES_PT.indexOf(filtroMes);
+  else selMes.value = new Date().getMonth();
+  if (filtroAno) selAno.value = filtroAno;
+  // Reset
+  document.getElementById('ef-form').style.display = 'block';
+  document.getElementById('ef-progresso').style.display = 'none';
+  atualizarInfoExportFaturas();
+  // Listeners
+  selMes.onchange = atualizarInfoExportFaturas;
+  selAno.onchange = atualizarInfoExportFaturas;
+  document.getElementById('ef-cat-empresa').onchange = atualizarInfoExportFaturas;
+  document.getElementById('ef-cat-cliente').onchange = atualizarInfoExportFaturas;
+  modal.style.display = 'flex';
+}
+
+function fecharModalExportarFaturas() {
+  document.getElementById('modal-export-faturas').style.display = 'none';
+}
+
+function atualizarInfoExportFaturas() {
+  const mes = parseInt(document.getElementById('ef-mes').value);
+  const ano = parseInt(document.getElementById('ef-ano').value);
+  const incEmp = document.getElementById('ef-cat-empresa').checked;
+  const incCli = document.getElementById('ef-cat-cliente').checked;
+  const movs = movimentosFiltradosParaExport(mes, ano, incEmp, incCli);
+  const comFatura = movs.filter(m => m[CB.ligacaoFatura]);
+  const semFatura = movs.length - comFatura.length;
+  const info = document.getElementById('ef-info');
+  if (!incEmp && !incCli) {
+    info.innerHTML = '<span style="color:#92400E">⚠️ Seleciona pelo menos uma categoria.</span>';
+    return;
+  }
+  if (movs.length === 0) {
+    info.innerHTML = `Sem movimentos no período selecionado.`;
+    return;
+  }
+  info.innerHTML = `<strong>${movs.length}</strong> movimento(s) — <strong>${comFatura.length}</strong> com fatura anexada${semFatura > 0 ? `, ${semFatura} sem fatura (ficarão só listados)` : ''}.`;
+}
+
+function movimentosFiltradosParaExport(mes, ano, incEmp, incCli) {
+  return (todosMovimentos || []).filter(i => {
+    if (!i[CB.data]) return false;
+    const d = new Date(i[CB.data]);
+    if (d.getMonth() !== mes || d.getFullYear() !== ano) return false;
+    const tipo = i[CB.tipo] || '';
+    if (tipo === 'Despesa empresa' && !incEmp) return false;
+    if (tipo === 'Pagamento por conta cliente' && !incCli) return false;
+    if (tipo !== 'Despesa empresa' && tipo !== 'Pagamento por conta cliente') return false;
+    return true;
+  }).sort((a, b) => {
+    const da = new Date(a[CB.data]).getTime();
+    const db = new Date(b[CB.data]).getTime();
+    return da - db;
+  });
+}
+
+function carregarScriptDinamico(src) {
+  return new Promise((res, rej) => {
+    const s = document.createElement('script');
+    s.src = src;
+    s.onload = res;
+    s.onerror = rej;
+    document.head.appendChild(s);
+  });
+}
+
+async function gerarPDFFaturas() {
+  const mes = parseInt(document.getElementById('ef-mes').value);
+  const ano = parseInt(document.getElementById('ef-ano').value);
+  const incEmp = document.getElementById('ef-cat-empresa').checked;
+  const incCli = document.getElementById('ef-cat-cliente').checked;
+  if (!incEmp && !incCli) {
+    toast('Seleciona pelo menos uma categoria', 'error');
+    return;
+  }
+  const movs = movimentosFiltradosParaExport(mes, ano, incEmp, incCli);
+  if (!movs.length) {
+    toast('Sem movimentos no período selecionado', 'error');
+    return;
+  }
+
+  // Mostrar progresso
+  document.getElementById('ef-form').style.display = 'none';
+  document.getElementById('ef-progresso').style.display = 'block';
+  const setProg = (pct, texto, titulo) => {
+    document.getElementById('ef-prog-bar').style.width = pct + '%';
+    if (texto !== undefined) document.getElementById('ef-prog-texto').textContent = texto;
+    if (titulo !== undefined) document.getElementById('ef-prog-titulo').textContent = titulo;
+  };
+
+  try {
+    setProg(2, 'A carregar bibliotecas...', 'Preparação');
+    if (!window.PDFLib) await carregarScriptDinamico('https://unpkg.com/pdf-lib@1.17.1/dist/pdf-lib.min.js');
+    if (!window.PDFLib) throw new Error('pdf-lib não carregou');
+
+    const { PDFDocument, StandardFonts, rgb, PageSizes } = window.PDFLib;
+    const pdfOut = await PDFDocument.create();
+    const fontNormal = await pdfOut.embedFont(StandardFonts.Helvetica);
+    const fontBold = await pdfOut.embedFont(StandardFonts.HelveticaBold);
+
+    // Reservar páginas de capa+índice — vamos preencher no fim porque precisamos saber em que página cada fatura ficou
+    setProg(5, 'A preparar capa e índice...', 'Capa');
+
+    // Processar cada movimento
+    const mesNome = MESES_PT[mes];
+    const totalMovs = movs.length;
+    let totalEmpresa = 0, totalCliente = 0;
+    const indiceEntries = []; // {idx, data, descricao, tipo, valor, pagina (a preencher)}
+
+    // Vamos primeiro gerar todas as páginas das faturas, depois fazer capa+índice e juntar tudo no fim
+    for (let i = 0; i < movs.length; i++) {
+      const mov = movs[i];
+      const valor = parseFloat(mov[CB.valor]) || 0;
+      if (mov[CB.tipo] === 'Despesa empresa') totalEmpresa += valor;
+      else totalCliente += valor;
+
+      const pct = 5 + Math.floor((i / totalMovs) * 85);
+      setProg(pct, `${i + 1} de ${totalMovs}: ${(mov[CB.descricao] || '—').substring(0, 50)}`, 'A processar faturas');
+
+      // Página de separador para cada movimento
+      const sepPage = pdfOut.addPage(PageSizes.A4);
+      const { width, height } = sepPage.getSize();
+      const m = 50;
+      let y = height - m - 10;
+      sepPage.drawText(`#${i + 1}`, { x: m, y: y, size: 28, font: fontBold, color: rgb(0.3, 0.3, 0.3) });
+      y -= 50;
+      sepPage.drawText(mov[CB.descricao] || '—', { x: m, y: y, size: 14, font: fontBold, color: rgb(0, 0, 0) });
+      y -= 25;
+      const dataStr = mov[CB.data] ? new Date(mov[CB.data]).toLocaleDateString('pt-PT') : '';
+      sepPage.drawText(`Data: ${dataStr}`, { x: m, y: y, size: 11, font: fontNormal });
+      y -= 18;
+      sepPage.drawText(`Tipo: ${mov[CB.tipo] || ''}`, { x: m, y: y, size: 11, font: fontNormal });
+      y -= 18;
+      sepPage.drawText(`Categoria: ${mov[CB.categoria] || '—'}`, { x: m, y: y, size: 11, font: fontNormal });
+      y -= 18;
+      const valorStr = valor.toLocaleString('pt-PT', { minimumFractionDigits: 2, maximumFractionDigits: 2 }) + ' €';
+      sepPage.drawText(`Valor: ${valorStr}`, { x: m, y: y, size: 11, font: fontBold });
+      if (mov[CB.cliente]) {
+        y -= 18;
+        sepPage.drawText(`Cliente: ${mov[CB.cliente]}`, { x: m, y: y, size: 11, font: fontNormal });
+      }
+      if (mov[CB.faturaInterna]) {
+        y -= 18;
+        sepPage.drawText(`Fatura interna: ${mov[CB.faturaInterna]}`, { x: m, y: y, size: 11, font: fontNormal });
+      }
+
+      const paginaInicial = pdfOut.getPageCount(); // Página do separador
+      let temFatura = false;
+
+      // Tentar baixar e anexar a fatura
+      const linkFat = mov[CB.ligacaoFatura];
+      if (linkFat) {
+        try {
+          const buf = await baixarFaturaPorWebUrl(linkFat);
+          if (buf) {
+            // Detectar tipo pelo conteúdo (primeiros bytes)
+            const u8 = new Uint8Array(buf.slice(0, 8));
+            const isPDF = u8[0] === 0x25 && u8[1] === 0x50 && u8[2] === 0x44 && u8[3] === 0x46; // %PDF
+            const isJPG = u8[0] === 0xFF && u8[1] === 0xD8;
+            const isPNG = u8[0] === 0x89 && u8[1] === 0x50 && u8[2] === 0x4E && u8[3] === 0x47;
+            if (isPDF) {
+              const srcDoc = await PDFDocument.load(buf, { ignoreEncryption: true });
+              const pagesCopiadas = await pdfOut.copyPages(srcDoc, srcDoc.getPageIndices());
+              pagesCopiadas.forEach(p => pdfOut.addPage(p));
+              temFatura = true;
+            } else if (isJPG || isPNG) {
+              const img = isJPG ? await pdfOut.embedJpg(buf) : await pdfOut.embedPng(buf);
+              const imgPage = pdfOut.addPage(PageSizes.A4);
+              const { width: pw, height: ph } = imgPage.getSize();
+              const margin = 30;
+              const maxW = pw - 2 * margin;
+              const maxH = ph - 2 * margin;
+              const ratio = Math.min(maxW / img.width, maxH / img.height);
+              const w = img.width * ratio;
+              const h = img.height * ratio;
+              imgPage.drawImage(img, {
+                x: (pw - w) / 2,
+                y: (ph - h) / 2,
+                width: w,
+                height: h
+              });
+              temFatura = true;
+            } else {
+              // Formato não suportado (Word, Excel, etc.) — só fica o separador
+              y -= 30;
+              sepPage.drawText('⚠ Fatura em formato nao-PDF/imagem (nao incluida)', { x: m, y: y, size: 10, font: fontNormal, color: rgb(0.6, 0.4, 0) });
+            }
+          } else {
+            y -= 30;
+            sepPage.drawText('⚠ Nao foi possivel descarregar a fatura', { x: m, y: y, size: 10, font: fontNormal, color: rgb(0.6, 0.2, 0.2) });
+          }
+        } catch (e) {
+          console.warn('Erro a anexar fatura', mov[CB.titulo], e);
+          y -= 30;
+          sepPage.drawText('⚠ Erro a processar fatura', { x: m, y: y, size: 10, font: fontNormal, color: rgb(0.6, 0.2, 0.2) });
+        }
+      } else {
+        y -= 30;
+        sepPage.drawText('Sem fatura anexada', { x: m, y: y, size: 10, font: fontNormal, color: rgb(0.5, 0.5, 0.5) });
+      }
+
+      indiceEntries.push({
+        idx: i + 1,
+        data: dataStr,
+        descricao: mov[CB.descricao] || '—',
+        tipo: mov[CB.tipo],
+        valor: valorStr,
+        pagina: paginaInicial,
+        temFatura
+      });
+    }
+
+    setProg(92, 'A montar capa e índice...', 'Finalização');
+
+    // Capa + índice: criar PDF separado, depois inserir nas primeiras páginas
+    const capaDoc = await PDFDocument.create();
+    const capaFont = await capaDoc.embedFont(StandardFonts.Helvetica);
+    const capaFontBold = await capaDoc.embedFont(StandardFonts.HelveticaBold);
+    const capa = capaDoc.addPage(PageSizes.A4);
+    const { width: cw, height: ch } = capa.getSize();
+    let cy = ch - 100;
+    capa.drawText('FATURAS', { x: 50, y: cy, size: 32, font: capaFontBold });
+    cy -= 40;
+    capa.drawText(`${mesNome} ${ano}`, { x: 50, y: cy, size: 20, font: capaFont, color: rgb(0.3, 0.3, 0.3) });
+    cy -= 60;
+    const cats = [];
+    if (incEmp) cats.push('Despesas da empresa');
+    if (incCli) cats.push('Por conta do cliente');
+    capa.drawText(`Categorias: ${cats.join(' + ')}`, { x: 50, y: cy, size: 11, font: capaFont });
+    cy -= 25;
+    capa.drawText(`Total de movimentos: ${movs.length}`, { x: 50, y: cy, size: 11, font: capaFont });
+    if (incEmp) {
+      cy -= 18;
+      capa.drawText(`Total Despesas Empresa: ${totalEmpresa.toLocaleString('pt-PT', { minimumFractionDigits: 2 })} €`, { x: 50, y: cy, size: 11, font: capaFont });
+    }
+    if (incCli) {
+      cy -= 18;
+      capa.drawText(`Total Por Conta Cliente: ${totalCliente.toLocaleString('pt-PT', { minimumFractionDigits: 2 })} €`, { x: 50, y: cy, size: 11, font: capaFont });
+    }
+    cy -= 30;
+    capa.drawText(`Gerado em ${new Date().toLocaleDateString('pt-PT')} ${new Date().toLocaleTimeString('pt-PT')}`, { x: 50, y: cy, size: 9, font: capaFont, color: rgb(0.5, 0.5, 0.5) });
+
+    // Páginas de índice
+    const linhasPorPag = 35;
+    const totalIdxPages = Math.ceil(indiceEntries.length / linhasPorPag);
+    const offsetCapaIdx = 1 + totalIdxPages; // página da primeira fatura ficará na pos: pos_atual + offsetCapaIdx
+
+    for (let p = 0; p < totalIdxPages; p++) {
+      const idxPage = capaDoc.addPage(PageSizes.A4);
+      const { width: iw, height: ih } = idxPage.getSize();
+      let iy = ih - 50;
+      idxPage.drawText(`Índice (página ${p + 1}/${totalIdxPages})`, { x: 50, y: iy, size: 14, font: capaFontBold });
+      iy -= 30;
+      idxPage.drawText('#', { x: 50, y: iy, size: 8, font: capaFontBold });
+      idxPage.drawText('Data', { x: 75, y: iy, size: 8, font: capaFontBold });
+      idxPage.drawText('Descrição', { x: 130, y: iy, size: 8, font: capaFontBold });
+      idxPage.drawText('Valor', { x: 410, y: iy, size: 8, font: capaFontBold });
+      idxPage.drawText('Pág.', { x: 480, y: iy, size: 8, font: capaFontBold });
+      iy -= 15;
+      idxPage.drawLine({ start: { x: 50, y: iy + 5 }, end: { x: 540, y: iy + 5 }, thickness: 0.5, color: rgb(0.7, 0.7, 0.7) });
+      iy -= 5;
+      const start = p * linhasPorPag;
+      const end = Math.min(start + linhasPorPag, indiceEntries.length);
+      for (let i = start; i < end; i++) {
+        const e = indiceEntries[i];
+        idxPage.drawText(String(e.idx), { x: 50, y: iy, size: 8, font: capaFont });
+        idxPage.drawText(e.data, { x: 75, y: iy, size: 8, font: capaFont });
+        const desc = e.descricao.length > 50 ? e.descricao.substring(0, 47) + '...' : e.descricao;
+        idxPage.drawText(desc, { x: 130, y: iy, size: 8, font: capaFont });
+        idxPage.drawText(e.valor, { x: 410, y: iy, size: 8, font: capaFont });
+        idxPage.drawText(String(e.pagina + offsetCapaIdx), { x: 480, y: iy, size: 8, font: capaFont });
+        iy -= 16;
+      }
+    }
+
+    // Juntar capa+índice ao início do pdfOut
+    setProg(96, 'A inserir capa no PDF...', 'Finalização');
+    const paginasCapa = await pdfOut.copyPages(capaDoc, capaDoc.getPageIndices());
+    paginasCapa.reverse().forEach(p => pdfOut.insertPage(0, p));
+
+    setProg(99, 'A guardar...', 'Finalização');
+    const pdfBytes = await pdfOut.save();
+    const blob = new Blob([pdfBytes], { type: 'application/pdf' });
+    const url = URL.createObjectURL(blob);
+    const a = document.createElement('a');
+    a.href = url;
+    const sufixo = (incEmp && incCli) ? 'Todas' : (incEmp ? 'Empresa' : 'Cliente');
+    a.download = `Faturas_${ano}-${String(mes + 1).padStart(2, '0')}_${sufixo}.pdf`;
+    document.body.appendChild(a);
+    a.click();
+    a.remove();
+    URL.revokeObjectURL(url);
+
+    setProg(100, '✓ Concluído!');
+    setTimeout(() => {
+      fecharModalExportarFaturas();
+      toast(`✓ PDF gerado: ${movs.length} movimentos`, 'success');
+    }, 600);
+
+  } catch (e) {
+    console.error('Erro a gerar PDF:', e);
+    toast('Erro a gerar PDF: ' + (e.message || e), 'error');
+    document.getElementById('ef-form').style.display = 'block';
+    document.getElementById('ef-progresso').style.display = 'none';
+  }
 }
 
 // ══════════════════════════════════════════════════════════════════
